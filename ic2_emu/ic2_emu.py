@@ -28,8 +28,8 @@ class Device(object):
         self._address = address
         if i2c_interface is None:
             # Use pure python I2C interface if none is specified.
-            import IC2_Emu.asciiBus
-            self._bus = IC2_Emu.asciiBus(busnum)
+            #import .asciiBus
+            self._bus = asciiBus(busnum)
         else:
             # Otherwise use the provided class to create an smbus interface.
             self._bus = i2c_interface(busnum)
@@ -38,9 +38,14 @@ class Device(object):
 
     def writeList(self, register, data):
         """Write bytes to the specified register."""
+        self._logger.debug(".writeList:Writing list:%s to register 0x%02X", data, register)
         self._bus.write_i2c_block_data(self._address, register, data)
-        self._logger.debug("Wrote to register 0x%02X: %s",
-                     register, data)
+
+    def write8(self, register, value):
+        """Write an 8-bit value to the specified register."""
+        value = value & 0xFF
+        self._logger.debug(".write8:Writing value:0x%02X to register 0x%02X", value, register)
+        self._bus.write_byte_data(self._address, register, value)
 
 class asciiBus(object):
     """
@@ -51,4 +56,8 @@ class asciiBus(object):
         self._logger = logging.getLogger('I2C_Emu.AsciiBus')
 
     def write_i2c_block_data(self, address, register, data):
-        self._logger.debug(self, 'write_i2c_block_data({0},{1},{2})' .format(address, register, data))
+        self._logger.debug('write_i2c_block_data({0},{1},{2})' .format(address, register, data))
+
+    def write_byte_data(self, address, register, value):
+        self._logger.debug('write_byte_data({0},{1},{2})' .format(address, register, value))
+
