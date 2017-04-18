@@ -95,7 +95,7 @@ class textTableBus(object):
     def __init__(self, busnum):
         self._logger = logging.getLogger('I2C_Emu.textTableBus')
         # initialise internal data buffer array
-        self.data = [["" for j in range(8)] for i in range(8)]
+        self.data = [[0 for j in range(8)] for i in range(8)]
 
     def draw(self):
         table = Texttable()
@@ -105,44 +105,37 @@ class textTableBus(object):
         table.add_row(["1", "2", "3", "4", "5", "6", "7", "8"])
         for row in self.data:
             # todo prepend row index?
-            table.add_row([col for col in row])
+            table.add_row([self.render_pixel(col) for col in row])
         print(table.draw() + "\n")
 
     def write_i2c_block_data(self, address, register, data):
         self._logger.debug('write_i2c_block_data({0},{1},{2})' .format(address, register, data))
 
     def write_byte_data(self, address, register, value):
-        """"Sets pixel into data buffer array"""
+        """"Sets/Clears a pixel into data buffer array"""
         self._logger.debug('write_byte_data({0},{1},{2})' .format(address, register, value))
         # Odd/even = colour for the bi-colour display
         [row, mod] = divmod(register, 2)
-        colour = "R" if mod else "G"
-        self._logger.debug('row:{0} colour:{1} ' .format(row, colour))
+        # colourBit is the pixel colour we're turning on or off in the colour bit mask
+        colourBit = 0 if mod else 1
+        self._logger.debug('row:{0} colour:{1} ' .format(row, colourBit))
 
         # Map to array row from bitfield
         for j in range(8):
-            # TODO need to check R+G=Y, or use 16 rows to show "RG"? or separate them all out into 3 virtual pixels?
-            # colour is the pixel colour we're turning on or off
-            if (value & pow(2,j)):
-                # add a colour
-                if (colour == "R" and self.data[row][j] == "G") or (colour == "G" and self.data[row][j] == "R"): pixelColour = "Y"
-                else: pixelColour = colour
-            else:
-                # remove a colour
-                if (self.data[row][j] == "Y"): pixelColour = "R" if (colour == "G") else "G"
-                else: pixelColour = ""
+            # Set this colour's bit in our colour mask
+            self.data[row][j] = self.set_bit(self.data[row][j], colourBit, (value & pow(2, j)))
+            self._logger.debug('pixel j:{0} set:{2} now:{1:02b} '.format(j, self.data[row][j], (value & pow(2, j))))
 
-            self.data[row][j] = pixelColour
-            self._logger.debug('pixel j:{0} set:{1} '.format(j, value & pow(2,j)))
-
-        # print("Draw: row:{0} colour:{1} cells:{2:08b}(0x{2:x})".format(row, colour, value))
+        # print("Draw: row:{0} colour:{1} cells:{2:08b}(0x{2:x})".format(row, colourBit, value))
         self.draw()
 
-    def renderPixel(self, value):
-        """Decodes the GR=Y combination
-            00 =' '
-            01 = G
-            10 = R
-            11 = Y
-        """
-        return ("G" if value & 1 else "") + ("R" if value & 2 else "")
+    def render_pixel(self, value):
+        """Decodes the GR=Y combination"""
+        return {0: ' ', 1: 'G', 2: 'R', 3: 'Y'}[value]
+
+    def set_bit(self, v, index, x):
+        """Set the index:th bit of v to 1 if x is truthy, else to 0, and return the new value."""
+        mask = 1 << index  # Compute mask, an integer with just bit 'index' set.
+        v &= ~mask  # Clear the bit indicated by the mask (if x is False)
+        if x: v |= mask  # If x was True, set the bit indicated by the mask.
+        return v
