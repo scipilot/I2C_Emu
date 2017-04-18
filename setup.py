@@ -7,13 +7,13 @@ with open('LICENSE') as f:
     license = f.read()
 
 setup(
-    name='IC2_Emu',
+    name='ic2_emu',
     version='0.1.0',
-    description='IC2_Emu Provides an emulator for Adafruit_GPIO/I2C',
+    description='Provides an emulator for Adafruit_GPIO/I2C',
     long_description=readme,
     author='Pip Jones',
     author_email='code@scipilot.org',
-    url='https://github.com/scipilot/IC2_Emu',
+    url='https://github.com/scipilot/ic2_emu',
     license=license,
-    packages=find_packages(exclude=('tests', 'docs'))
+    packages=['ic2_emu']
 )
