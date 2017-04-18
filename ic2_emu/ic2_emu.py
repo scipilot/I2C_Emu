@@ -95,7 +95,7 @@ class textTableBus(object):
     def __init__(self, busnum):
         self._logger = logging.getLogger('I2C_Emu.textTableBus')
         # initialise internal data buffer array
-        self.data = [[0 for j in range(8)] for i in range(8)]
+        self.data = [["" for j in range(8)] for i in range(8)]
 
     def draw(self):
         table = Texttable()
@@ -112,22 +112,37 @@ class textTableBus(object):
         self._logger.debug('write_i2c_block_data({0},{1},{2})' .format(address, register, data))
 
     def write_byte_data(self, address, register, value):
+        """"Sets pixel into data buffer array"""
         self._logger.debug('write_byte_data({0},{1},{2})' .format(address, register, value))
-        # Set pixel into data buffer array
-        # Odd/even = colour
+        # Odd/even = colour for the bi-colour display
         [row, mod] = divmod(register, 2)
-        # TODO need to check neighbour to make Y, or use 16 rows to show "RG"? or just separate them all out into 3 virtual pixels?
-        colour = ""
-        if(register % 2 == 0):
-            colour = "G"
-        else:
-            colour = "R"
+        colour = "R" if mod else "G"
         self._logger.debug('row:{0} colour:{1} ' .format(row, colour))
-        # Map to array
-        for j in range(8):
-            # Check if each bit is set
-            self._logger.debug('pixel j:{0} set:{1} '.format(j, value & pow(2,j)))
-            self.data[row][j] = colour if (value & pow(2,j)) else ""
 
+        # Map to array row from bitfield
+        for j in range(8):
+            # TODO need to check R+G=Y, or use 16 rows to show "RG"? or separate them all out into 3 virtual pixels?
+            # colour is the pixel colour we're turning on or off
+            if (value & pow(2,j)):
+                # add a colour
+                if (colour == "R" and self.data[row][j] == "G") or (colour == "G" and self.data[row][j] == "R"): pixelColour = "Y"
+                else: pixelColour = colour
+            else:
+                # remove a colour
+                if (self.data[row][j] == "Y"): pixelColour = "R" if (colour == "G") else "G"
+                else: pixelColour = ""
+
+            self.data[row][j] = pixelColour
+            self._logger.debug('pixel j:{0} set:{1} '.format(j, value & pow(2,j)))
+
+        # print("Draw: row:{0} colour:{1} cells:{2:08b}(0x{2:x})".format(row, colour, value))
         self.draw()
 
+    def renderPixel(self, value):
+        """Decodes the GR=Y combination
+            00 =' '
+            01 = G
+            10 = R
+            11 = Y
+        """
+        return ("G" if value & 1 else "") + ("R" if value & 2 else "")
