@@ -4,12 +4,26 @@
 #
 # Author: Pip Jones
 # Based on the INTERFACE of Adafruit_GPIO/I2C.py created by Tony DiCola which is Copyright (c) 2014 Adafruit Industries
+#
+# The rows/columns are represented by register/value combinations.
+# - R00 = Green pixels in row 1
+# - R01 = Red pixels in row 1
+# ...
+# - R0E = Green pixels in row 8
+# - R0F = Red pixels in row 8
+# - Red+Green = Yellow
+#
+# The columns are set/cleared by bits in the data:
+# - 00 = all off,
+# - 01, 02, 04 ... 80 = individual pixels
+# - FF = all on
+#
+# The emulator has to update the output display per-pixel change (there is no "frame").
+
 
 import logging
-import math
-import array
 
-# todo: make a DI interface for the renderer?
+# todo: make a DI interface for the renderer? try the i2c_interface parameter?
 from texttable import Texttable
 
 def get_i2c_device(address, busnum=None, i2c_interface=None, **kwargs):
@@ -34,9 +48,10 @@ class Device(object):
         if i2c_interface is None:
             # Use pure python I2C interface if none is specified.
             #import asciiBus
-            # self._bus = asciiLogBus(busnum)
-            # self._bus = textTableBus(busnum)
-            self._bus = consoleTextBus(busnum)
+            # self._bus = asciiLogBus()
+            # self._bus = BicolorMatrix8x8Emu(textTableOutputDriver())
+            # self._bus = BicolorMatrix8x8Emu(consoleMatrixOutputDriver())
+            self._bus = BicolorMatrix8x8Emu(consoleFretboardOutputDriver())
         else:
             # Otherwise use the provided class to create an smbus interface.
             self._bus = i2c_interface(busnum)
@@ -55,30 +70,12 @@ class Device(object):
         self._bus.write_byte_data(self._address, register, value)
 
 
-"""
-The rows/columns are represented by register/value combinations.
-- R00 = Green pixels in row 1
-- R01 = Red pixels in row 1
-- R0E = Green pixels in row 8
-- R0F = Red pixels in row 8
-- Red+Green = Yellow 
-
-The columns are set/cleared by bits in the data: 
-- 00 = all off, 
-- 01, 02, 04 ... 80 = individual pixels
-- FF = all on
-
-Address = 112
-
-The emulator has to update the output display per-pixel change (there is no "frame").
-"""
-
 class asciiLogBus(object):
     """
-    Writes all output into ASCII
+    Writes all output into ASCII log file
     """
 
-    def __init__(self, busnum):
+    def __init__(self):
         self._logger = logging.getLogger('I2C_Emu.asciiLogBus')
 
     def write_i2c_block_data(self, address, register, data):
@@ -87,12 +84,53 @@ class asciiLogBus(object):
     def write_byte_data(self, address, register, value):
         self._logger.debug('write_byte_data({0},{1},{2})' .format(address, register, value))
 
-class textTableBus(object):
+class BicolorMatrix8x8Emu(object):
+    """
+    Emulates the BicolorMatrix8x8 a Bi-Colour 8x8 LED Matrix, with Red, Green and virtual Yellow.
+    Requires an output driver to display on various outputs, and in various optical layouts.
+    
+    This emulator class mainly stores the state of the LEDs and helps combine R+G = Y
+    It re-draws the entire display every time a LED state changes (on write_byte_data). 
+    """
+
+    def __init__(self, outputDriver):
+        self._logger = logging.getLogger('I2C_Emu.textTableBus')
+        # initialise internal data buffer array
+        self._data = [[0 for j in range(8)] for i in range(8)]
+        self._outputDriver = outputDriver
+
+    def write_i2c_block_data(self, address, register, data):
+        self._logger.debug('write_i2c_block_data({0},{1},{2})' .format(address, register, data))
+
+    def write_byte_data(self, address, register, value):
+        """"Sets/Clears a pixel into data buffer array"""
+
+        # Odd/even register = colour for the bi-colour display
+        [row, mod] = divmod(register, 2)
+        # colourBit is the pixel colour we're turning on or off in the colour bit map
+        colourBit = 0 if mod else 1
+
+        # Map to array row from column-pixel bitfield in value
+        for j in range(8):
+            # Set this colour's bit in our colour mask
+            self._data[row][j] = self.set_bit(self._data[row][j], colourBit, (value & pow(2, j)))
+
+        # if register == 0x0f: # this optimises the drawing speed, if we know we always render the whole matrix! 0xF is the last row.
+        self._outputDriver.draw(self._data)
+
+    # this could be in a general library: from http://stackoverflow.com/a/12174051/209288
+    def set_bit(self, v, index, x):
+        """Set the index:th bit of v to 1 if x is truthy, else to 0, and return the new value."""
+        mask = 1 << index  # Compute mask, an integer with just bit 'index' set.
+        v &= ~mask  # Clear the bit indicated by the mask (if x is False)
+        if x: v |= mask  # If x was True, set the bit indicated by the mask.
+        return v
+
+class textTableOutputDriver(object):
     """
     Writes all output into ASCII Table on the console
     Using https://github.com/foutaise/texttable/
     
-    Stores the data internally in a two-colour per pixel bitmap: 00=off, 01=Green, 10=Red, 11=Yellow
     """
     # Note to get the console codes displaying properly via texttable I had to disable the cell-wrapping by writing a _splitit variant which does no processing.
     # I didn't fork/commit it as it ended up feeling like I was disabling 90% of texttable's functionality!
@@ -104,46 +142,18 @@ class textTableBus(object):
             return line_wrapped
     """
 
-    def __init__(self, busnum):
-        self._logger = logging.getLogger('I2C_Emu.textTableBus')
-        # initialise internal data buffer array
-        self.data = [[0 for j in range(8)] for i in range(8)]
-
-    def draw(self):
+    def draw(self, data):
         table = Texttable()
         table.set_deco(0)
         table.set_cols_width([1 for j in range(8)])
         # table.set_cols_align(['c' for j in range(8)])
         # table.set_cols_dtype(['t' for j in range(8)])
-        #table.set_cols_valign(["t", "m", "b"])
         # Column indexes
         table.add_row([j for j in range(8)])
-        for row in self.data:
+        for row in data:
             # todo prepend row index?
             table.add_row([self.render_pixel(col) for col in row])
         print(table.draw() + "\n")
-
-    def write_i2c_block_data(self, address, register, data):
-        self._logger.debug('write_i2c_block_data({0},{1},{2})' .format(address, register, data))
-
-    def write_byte_data(self, address, register, value):
-        """"Sets/Clears a pixel into data buffer array"""
-        # self._logger.debug('write_byte_data({0},{1},{2})' .format(address, register, value))
-        # Odd/even register = colour for the bi-colour display
-        [row, mod] = divmod(register, 2)
-        # colourBit is the pixel colour we're turning on or off in the colour bit map
-        colourBit = 0 if mod else 1
-        # self._logger.debug('row:{0} colour:{1} ' .format(row, colourBit))
-
-        # Map to array row from column-pixel bitfield in value
-        for j in range(8):
-            # Set this colour's bit in our colour mask
-            self.data[row][j] = self.set_bit(self.data[row][j], colourBit, (value & pow(2, j)))
-            # self._logger.debug('pixel j:{0} set:{2} now:{1:02b} '.format(j, self.data[row][j], (value & pow(2, j))))
-
-        # print("Draw: row:{0} colour:{1} cells:{2:08b}(0x{2:x})".format(row, colourBit, value))
-        # if register == 0x0f: # this optimises the drawing speed, if we know we always render the whole matrix! 0xF is the last row.
-        self.draw()
 
     def render_pixel(self, value):
         """Decodes the G+R=Y combination to human readable. They could be console colour codes!"""
@@ -152,47 +162,14 @@ class textTableBus(object):
         return {0b00: ' ', 0b01: "\33[42m \33[0m", 0b10: '\33[41m \33[0m', 0b11: '\33[43m \33[0m'}[value]
         # return {0b00: ' ', 0b01: '|', 0b10: '-', 0b11: '+'}[value]
 
-    # this could be in a general library: from http://stackoverflow.com/a/12174051/209288
-    def set_bit(self, v, index, x):
-        """Set the index:th bit of v to 1 if x is truthy, else to 0, and return the new value."""
-        mask = 1 << index  # Compute mask, an integer with just bit 'index' set.
-        v &= ~mask  # Clear the bit indicated by the mask (if x is False)
-        if x: v |= mask  # If x was True, set the bit indicated by the mask.
-        return v
-
-
-class consoleTextBus(object):
+class consoleMatrixOutputDriver(object):
     """
-    Outputs colour-coded display to a terminal.
-    Note it duplicates the internal storage with the above textTableBus, needs a parent class
+    Outputs colour-coded display to a terminal console in a simple grid layout.
     """
-    def __init__(self, busnum):
-        self._logger = logging.getLogger('I2C_Emu.textTableBus')
-        # initialise internal data buffer array
-        self.data = [[0 for j in range(8)] for i in range(8)]
 
-    def write_i2c_block_data(self, address, register, data):
-        self._logger.debug('write_i2c_block_data({0},{1},{2})' .format(address, register, data))
-
-    def write_byte_data(self, address, register, value):
-        """"Sets/Clears a pixel into data buffer array"""
-
-        # Odd/even register = colour for the bi-colour display
-        [row, mod] = divmod(register, 2)
-        # colourBit is the pixel colour we're turning on or off in the colour bit map
-        colourBit = 0 if mod else 1
-
-        # Map to array row from column-pixel bitfield in value
-        for j in range(8):
-            # Set this colour's bit in our colour mask
-            self.data[row][j] = self.set_bit(self.data[row][j], colourBit, (value & pow(2, j)))
-
-        # if register == 0x0f: # this optimises the drawing speed, if we know we always render the whole matrix! 0xF is the last row.
-        self.draw()
-
-    def draw(self):
+    def draw(self, data):
         str = ''
-        for row in self.data:
+        for row in data:
             for cell in row:
                 str += self.render_pixel(cell)
             str += "\n"
@@ -205,10 +182,32 @@ class consoleTextBus(object):
         return {0b00: ' ', 0b01: "\33[42m \33[0m", 0b10: '\33[41m \33[0m', 0b11: '\33[43m \33[0m'}[value]
         # return {0b00: ' ', 0b01: '|', 0b10: '-', 0b11: '+'}[value]
 
-    # this could be in a general library: from http://stackoverflow.com/a/12174051/209288
-    def set_bit(self, v, index, x):
-        """Set the index:th bit of v to 1 if x is truthy, else to 0, and return the new value."""
-        mask = 1 << index  # Compute mask, an integer with just bit 'index' set.
-        v &= ~mask  # Clear the bit indicated by the mask (if x is False)
-        if x: v |= mask  # If x was True, set the bit indicated by the mask.
-        return v
+class consoleFretboardOutputDriver(object):
+    """
+    Outputs colour-coded display to a terminal console in a simulated Fretboard layout.
+    
+    In this mapping, the 8*8 matrix is re-wrapped to 6 string x 12 frets. So we ignore the original matrix width. 
+    
+    """
+
+    def draw(self, data):
+        str = ' '
+        string = 1
+        fret = 1
+        for row in data:
+            for cell in row:
+                string += 1
+                str += self.render_pixel(cell) + ' '
+                if string % 7 == 0:
+                    str += "\n------------\n "
+                    string = 1
+                    fret += 1
+        print(str+"\n")
+
+    def render_pixel(self, value):
+        """Decodes the G+R=Y combination to human readable. They could be console colour codes!"""
+        # return {0b00: ' ', 0b01: 'G', 0b10: 'R', 0b11: 'Y'}[value]
+        # colours
+        return {0b00: ' ', 0b01: "\33[42m \33[0m", 0b10: '\33[41m \33[0m', 0b11: '\33[43m \33[0m'}[value]
+        # symbols
+        # return {0b00: ' ', 0b01: 'X', 0b10: '|', 0b11: '+'}[value]
