@@ -186,28 +186,53 @@ class consoleFretboardOutputDriver(object):
     """
     Outputs colour-coded display to a terminal console in a simulated Fretboard layout.
     
-    In this mapping, the 8*8 matrix is re-wrapped to 6 string x 12 frets. So we ignore the original matrix width. 
-    
+    In this mapping, the 8*8 matrix is re-wrapped to 6 string x 11 frets. So we ignore the original matrix width.
+    Pixel mapping is thus: 
+    Fret:  Nut 1  2  3  4  5  6  7  8  9 10 11
+    String
+       E    || 6 12 18 24 30 36 42 48 54 60
+       B    || 5 11 17 23 29 35 41 47 53 59
+       G    || 4 10 16 22 28 34 40 46 52 58 64
+       D    || 3  9 15 21 27 33 39 45 51 57 63
+       A    || 2  8 14 20 26 32 38 44 50 56 62
+       E    || 1  7 13 19 25 31 37 43 49 55 61         
     """
 
     def draw(self, data):
+        horizontal = True
         str = ' '
         string = 1
         fret = 1
-        for row in data:
-            for cell in row:
-                string += 1
-                str += self.render_pixel(cell) + ' '
-                if string % 7 == 0:
-                    str += "\n------------\n "
-                    string = 1
-                    fret += 1
+
+        if horizontal:
+            for string in range(6):
+                for fret in range(11):
+                    str += self.render_pixel(self.getFretxel(data, string, fret))
+                str += "\n "
+
+        else:
+            for row in data:
+                for cell in row:
+                    string += 1
+                    str += self.render_pixel(cell) + ' '
+                    if string % 7 == 0:
+                        str += "\n------------\n "
+                        string = 1
+                        fret += 1
+
         print(str+"\n")
+
+    def getFretxel(self, data, string, fret):
+        """Gets the pixel state of a fret/string location, a note on the guitar."""
+        # Note-no = string + 6 * fret
+        # Matrix co-ord is note/8: modulus, remainder
+        x, y = divmod(string + 6 * (fret-1), 8)
+        return data[x][y]
 
     def render_pixel(self, value):
         """Decodes the G+R=Y combination to human readable. They could be console colour codes!"""
         # return {0b00: ' ', 0b01: 'G', 0b10: 'R', 0b11: 'Y'}[value]
         # colours
-        return {0b00: ' ', 0b01: "\33[42m \33[0m", 0b10: '\33[41m \33[0m', 0b11: '\33[43m \33[0m'}[value]
+        return {0b00: '  ', 0b01: "\33[42m  \33[0m", 0b10: '\33[41m  \33[0m', 0b11: '\33[43m  \33[0m'}[value]
         # symbols
         # return {0b00: ' ', 0b01: 'X', 0b10: '|', 0b11: '+'}[value]
