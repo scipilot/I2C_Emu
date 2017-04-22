@@ -7,10 +7,13 @@
 #
 # The rows/columns are represented by register/value combinations.
 # - R00 = Green pixels in row 1
-# - R01 = Red pixels in row 1
+# - R01 =   Red pixels in row 1
+# ...
+# - R09 = Green pixels in row 5
+# - R10 =   Red pixels in row 5
 # ...
 # - R0E = Green pixels in row 8
-# - R0F = Red pixels in row 8
+# - R0F =   Red pixels in row 8
 # - Red+Green = Yellow
 #
 # The columns are set/cleared by bits in the data:
@@ -199,16 +202,25 @@ class consoleFretboardOutputDriver(object):
     """
 
     def draw(self, data):
+        # could be parameters, but how to inject? settings?
         horizontal = True
-        str = ' '
+        show_frets = True
+        str = ''
         string = 1
         fret = 1
 
         if horizontal:
-            for string in range(6):
-                for fret in range(11):
-                    str += self.render_pixel(self.getFretxel(data, string, fret))
-                str += "\n "
+            #if show_frets: str += '===================================\n'
+            if show_frets: str += '___________________________________\n'
+            # iterate backwards as we're looking top-down rendering from the high string down to the low (first notes)
+            for string in range(6, 0, -1):
+            # for string in range(1, 6):
+                str += '||'
+                for fret in range(1, 11):
+                    str += self.render_pixel(self.getFretxel(data, string, fret)) \
+                           + ('|' if show_frets else '')
+                str += "\n"
+            if show_frets: str += '\\\\_______._____._____._____._______:\n'
 
         else:
             for row in data:
@@ -226,13 +238,21 @@ class consoleFretboardOutputDriver(object):
         """Gets the pixel state of a fret/string location, a note on the guitar."""
         # Note-no = string + 6 * fret
         # Matrix co-ord is note/8: modulus, remainder
-        x, y = divmod(string + 6 * (fret-1), 8)
+        x, y = divmod((string-1) + 6 * (fret-1), 8)
         return data[x][y]
+
+    def putFretxel(data, string, fret, note):
+        """Puts the pixel state of a fret/string location, a note on the guitar."""
+        # Note-no = string + 6 * fret
+        # Matrix co-ord is note/8: modulus, remainder
+        x, y = divmod((string - 1) + 6 * (fret - 1), 8)
+        data[x][y] = note
+        return data
 
     def render_pixel(self, value):
         """Decodes the G+R=Y combination to human readable. They could be console colour codes!"""
         # return {0b00: ' ', 0b01: 'G', 0b10: 'R', 0b11: 'Y'}[value]
         # colours
-        return {0b00: '  ', 0b01: "\33[42m  \33[0m", 0b10: '\33[41m  \33[0m', 0b11: '\33[43m  \33[0m'}[value]
+        return {0b00: '--', 0b01: "\33[42m--\33[0m", 0b10: '\33[41m--\33[0m', 0b11: '\33[43m--\33[0m'}[value]
         # symbols
         # return {0b00: ' ', 0b01: 'X', 0b10: '|', 0b11: '+'}[value]
